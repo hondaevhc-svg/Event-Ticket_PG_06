@@ -16,19 +16,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- SESSION STATE MANAGEMENT ---
-if 'active_tab' not in st.session_state:
-    st.session_state.active_tab = 0
 if 'admin_pass_key' not in st.session_state:
     st.session_state.admin_pass_key = ""
 if 'menu_pass_key' not in st.session_state:
     st.session_state.menu_pass_key = ""
 
-
 # --- DATABASE CONNECTION ---
 def get_engine():
     db_url = st.secrets["connections"]["postgresql"]["url"]
     return create_engine(db_url)
-
 
 @st.cache_data(ttl=60)
 def load_all_data():
@@ -51,7 +47,6 @@ def load_all_data():
         st.error(f"Database Error: {e}")
         st.stop()
 
-
 def save_to_db(tickets_df, menu_df=None):
     engine = get_engine()
     tickets_df.to_sql("tickets", engine, if_exists="replace", index=False)
@@ -59,12 +54,10 @@ def save_to_db(tickets_df, menu_df=None):
         menu_df.to_sql("menu", engine, if_exists="replace", index=False)
     st.cache_data.clear()
 
-
 def custom_sort(df):
     if 'Seq' not in df.columns: return df
     return df.assign(sort_key=df['Seq'].apply(lambda x: 10 if x == 0 or x == '0' else int(x))).sort_values(
         'sort_key').drop(columns='sort_key')
-
 
 # Initial Load
 tickets, menu = load_all_data()
@@ -76,7 +69,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    admin_pass = st.text_input("Reset Database Password", type="password", key="admin_pass_key")
+    admin_pass = st.text_input("Reset Database Password", type="password", key="admin_pass_input")
     if st.button("🚨 Reset Database"):
         if admin_pass == "admin123":
             tickets['Sold'] = False
@@ -85,7 +78,6 @@ with st.sidebar:
             tickets['Visitor_Seats'] = 0
             tickets['Timestamp'] = None
             save_to_db(tickets)
-            st.session_state.admin_pass_key = ""  # Clear password
             st.rerun()
         else:
             st.error("Incorrect Admin Password")
@@ -120,8 +112,8 @@ with tab_selection[0]:
 
     summary_final = pd.concat([summary, totals], ignore_index=True).dropna(how='all')
 
-    # Use height=None to ensure all rows (including Total) are visible without scrolling
-    st.dataframe(summary_final, hide_index=True, use_container_width=True, height=None)
+    # FIX: Changed height=None to height="auto"
+    st.dataframe(summary_final, hide_index=True, use_container_width=True, height="auto")
 
 # 2. SALES
 with tab_selection[1]:
@@ -133,8 +125,7 @@ with tab_selection[1]:
         if sale_tab == "Manual":
             s_type = st.radio("Type", ["Public", "Guest"], horizontal=True)
             s_cat = st.selectbox("Category", menu[menu['Type'] == s_type]['Category'])
-            avail = tickets[(tickets['Type'] == s_type) & (tickets['Category'] == s_cat) & (~tickets['Sold'])][
-                'TicketID'].tolist()
+            avail = tickets[(tickets['Type'] == s_type) & (tickets['Category'] == s_cat) & (~tickets['Sold'])]['TicketID'].tolist()
             if avail:
                 with st.form("sale_form", clear_on_submit=True):
                     tid = st.selectbox("Ticket ID", avail)
@@ -234,22 +225,22 @@ with tab_selection[3]:
     menu_display = custom_sort(menu.copy())
     edited_menu = st.data_editor(menu_display, hide_index=True, use_container_width=True)
 
-    # RECALCULATE LOGIC: Ensure changes to Series update Alloc/Capacity and affect Dashboard
+    # UPDATED LOGIC: Recalculate on-the-fly for any row in the editor
     for index, row in edited_menu.iterrows():
         try:
-            start, end = map(int, str(row['Series']).split('-'))
-            count = (end - start) + 1
-            edited_menu.at[index, 'Alloc'] = count
-            edited_menu.at[index, 'Total_Capacity'] = count * row['Admit']
+            if '-' in str(row['Series']):
+                start, end = map(int, str(row['Series']).split('-'))
+                count = (end - start) + 1
+                edited_menu.at[index, 'Alloc'] = count
+                edited_menu.at[index, 'Total_Capacity'] = count * row['Admit']
         except:
             pass
 
-    menu_update_pass = st.text_input("Enter Menu Update Password", type="password", key="menu_pass_key")
+    menu_pass = st.text_input("Enter Menu Update Password", type="password", key="menu_pass_input")
     if st.button("Update Database Menu"):
-        if menu_update_pass == "admin123":
+        if menu_pass == "admin123":
             save_to_db(tickets, edited_menu)
-            st.session_state.menu_pass_key = ""  # Clear password
             st.success("Menu Synchronized!")
-            st.rerun()
+            st.rerun() # This will clear the password field automatically
         else:
             st.error("Incorrect Menu Password")
